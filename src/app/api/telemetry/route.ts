@@ -152,7 +152,7 @@ export async function GET() {
       temp: 26.4,
       humidity: 52.0,
       light: 65.0,
-      rawAdc: 610,
+      rawAdc: 358,
       dhtValid: true,
       rainDetected: false,
       oledActive: false,
@@ -219,7 +219,7 @@ export async function POST(req: Request) {
     let light = body.light !== undefined ? Number(body.light) : (body.l !== undefined ? Number(body.l) : 0);
     if (body.light === undefined && body.l === undefined && rawAdc !== undefined) {
       const clampedAdc = Math.max(0, Math.min(1023, rawAdc));
-      light = Number(((clampedAdc / 1023) * 100).toFixed(0));
+      light = 100 - Number(((clampedAdc / 1023) * 100).toFixed(0));
     }
 
     const heatIndex = body.heatIndex !== undefined ? Number(body.heatIndex) : computeHeatIndex(rawTemp, rawHum);
