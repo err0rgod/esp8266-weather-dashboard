@@ -6,6 +6,8 @@ export interface TelemetryData {
   light: number;
   rawAdc?: number;
   dhtValid?: boolean;
+  rainDetected?: boolean;
+  oledActive?: boolean;
   heatIndex: number;
   dewPoint: number;
   rainProb: number;
@@ -33,7 +35,7 @@ const globalStore: GlobalTelemetryStore = (global as unknown as { _weatherStore?
 const DEFAULT_API_KEY = "weather123";
 
 // =========================================================================
-// METEOROLOGICAL & THERMAL COMPUTATION ENGINE (OFFLOADED FROM ESP TO VERCEL)
+// METEOROLOGICAL & THERMAL COMPUTATION ENGINE (OFFLOADED TO VERCEL)
 // =========================================================================
 
 function computeHeatIndex(tC: number, rh: number): number {
@@ -61,7 +63,9 @@ function computeDewPoint(tC: number, rh: number): number {
   return Number(dp.toFixed(2));
 }
 
-function computeRainProbability(tC: number, rh: number, lightPct: number, dewPoint: number): number {
+function computeRainProbability(tC: number, rh: number, lightPct: number, dewPoint: number, rainDetected: boolean): number {
+  if (rainDetected) return 100;
+
   let prob = 6;
   if (rh > 85) prob += 38;
   else if (rh > 70) prob += 24;
@@ -82,13 +86,22 @@ function evaluateConditionAndAdvice(
   lightPct: number,
   heatIndex: number,
   rainProb: number,
-  dhtValid: boolean
+  dhtValid: boolean,
+  rainDetected: boolean
 ): { condition: string; comfort: string; advice: string } {
   if (!dhtValid) {
     return {
       condition: "Sensor Standby",
       comfort: "Check DHT Connection",
-      advice: "DHT11 sensor reading unavailable. Please check physical wiring on D2/VCC/GND.",
+      advice: "DHT11 sensor reading unavailable. Check physical wiring on D5/D2.",
+    };
+  }
+
+  if (rainDetected) {
+    return {
+      condition: "Rain Detected",
+      comfort: "Active Precipitation",
+      advice: "Rain sensor is detecting moisture. Keep electronics covered and take umbrella.",
     };
   }
 
@@ -141,6 +154,8 @@ export async function GET() {
       light: 65.0,
       rawAdc: 610,
       dhtValid: true,
+      rainDetected: false,
+      oledActive: false,
       heatIndex: 27.2,
       dewPoint: 15.8,
       rainProb: 8,
@@ -194,26 +209,24 @@ export async function POST(req: Request) {
     const body = await req.json();
     const now = Date.now();
 
-    // Accept either compact keys ({t, h, l, adc, valid, uptime}) or verbose keys ({temp, humidity, light, rawAdc, dhtValid, uptime})
     const rawTemp = body.temp !== undefined ? Number(body.temp) : (body.t !== undefined ? Number(body.t) : 0);
     const rawHum = body.humidity !== undefined ? Number(body.humidity) : (body.h !== undefined ? Number(body.h) : 0);
     const rawAdc = body.rawAdc !== undefined ? Number(body.rawAdc) : (body.adc !== undefined ? Number(body.adc) : 0);
     const dhtValid = body.dhtValid !== undefined ? Boolean(body.dhtValid) : (body.valid !== undefined ? Boolean(body.valid) : true);
+    const rainDetected = body.rainDetected !== undefined ? Boolean(body.rainDetected) : (body.rain !== undefined ? Boolean(body.rain) : false);
+    const oledActive = body.oledActive !== undefined ? Boolean(body.oledActive) : false;
 
-    // Compute light percentage from raw ADC (0-1023) if not explicitly supplied
     let light = body.light !== undefined ? Number(body.light) : (body.l !== undefined ? Number(body.l) : 0);
     if (body.light === undefined && body.l === undefined && rawAdc !== undefined) {
       const clampedAdc = Math.max(0, Math.min(1023, rawAdc));
-      // Invert if LDR module outputs high in darkness, or direct ratio
       light = Number(((clampedAdc / 1023) * 100).toFixed(0));
     }
 
-    // Perform ALL meteorological and prediction calculations here on Vercel Serverless
     const heatIndex = body.heatIndex !== undefined ? Number(body.heatIndex) : computeHeatIndex(rawTemp, rawHum);
     const dewPoint = body.dewPoint !== undefined ? Number(body.dewPoint) : computeDewPoint(rawTemp, rawHum);
-    const rainProb = body.rainProb !== undefined ? Number(body.rainProb) : computeRainProbability(rawTemp, rawHum, light, dewPoint);
+    const rainProb = body.rainProb !== undefined ? Number(body.rainProb) : computeRainProbability(rawTemp, rawHum, light, dewPoint, rainDetected);
 
-    const { condition, comfort, advice } = evaluateConditionAndAdvice(rawTemp, rawHum, light, heatIndex, rainProb, dhtValid);
+    const { condition, comfort, advice } = evaluateConditionAndAdvice(rawTemp, rawHum, light, heatIndex, rainProb, dhtValid, rainDetected);
 
     const data: TelemetryData = {
       temp: rawTemp,
@@ -221,6 +234,8 @@ export async function POST(req: Request) {
       light,
       rawAdc,
       dhtValid,
+      rainDetected,
+      oledActive,
       heatIndex,
       dewPoint,
       rainProb,
@@ -234,7 +249,6 @@ export async function POST(req: Request) {
     globalStore.latest = data;
     globalStore.lastSeen = now;
 
-    // Append to rolling history
     if (dhtValid && rawTemp > 0) {
       globalStore.history.push({
         t: rawTemp,
@@ -251,6 +265,7 @@ export async function POST(req: Request) {
       success: true,
       timestamp: now,
       calculatedOnVercel: true,
+      rainDetected,
       pointsCount: globalStore.history.length,
     }, {
       headers: {
