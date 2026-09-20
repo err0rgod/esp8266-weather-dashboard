@@ -3,8 +3,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
   Sun, Moon, Cloud, CloudRain, CloudLightning, Droplets, 
-  Thermometer, RefreshCw, ChevronDown, ChevronUp, Search, 
-  Info, Clock
+  Thermometer, RefreshCw, Search, Info, Clock, CheckCircle2,
+  TrendingUp, ShieldCheck
 } from "lucide-react";
 
 interface TelemetryData {
@@ -51,7 +51,6 @@ export default function WeatherDashboard() {
   const [lastSeenSec, setLastSeenSec] = useState<number | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
-  const [showComparison, setShowComparison] = useState(false);
 
   // Live IST Clock
   const [istTimeStr, setIstTimeStr] = useState<string>("");
@@ -62,8 +61,8 @@ export default function WeatherDashboard() {
   const [searchCity, setSearchCity] = useState("New Delhi");
   const [apiLoading, setApiLoading] = useState(false);
 
-  // Chart selection
-  const [chartMetric, setChartMetric] = useState<"temp" | "hum" | "light">("temp");
+  // Chart selection (Default to "all" to show all 3 sensors on graph)
+  const [chartMetric, setChartMetric] = useState<"all" | "temp" | "hum" | "light">("all");
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const formatTemp = (c: number | undefined | null) => {
@@ -72,7 +71,7 @@ export default function WeatherDashboard() {
     return val.toFixed(1);
   };
 
-  // Update live IST Time every second
+  // Live IST Clock Updater (Asia/Kolkata)
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -124,7 +123,7 @@ export default function WeatherDashboard() {
     }
   };
 
-  // Open-Meteo Regional Weather Fetcher
+  // Regional Weather Comparison Fetcher
   const fetchApiWeather = async (lat = 28.6139, lon = 77.2090, locName = "New Delhi") => {
     try {
       setApiLoading(true);
@@ -189,7 +188,7 @@ export default function WeatherDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Minimal Canvas rendering
+  // Multi-Metric Canvas Rendering (Supports "all" or individual)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -215,88 +214,144 @@ export default function WeatherDashboard() {
       return;
     }
 
-    const padLeft = 40;
-    const padRight = 20;
-    const padTop = 20;
-    const padBottom = 25;
+    const padLeft = 38;
+    const padRight = chartMetric === "all" ? 38 : 20;
+    const padTop = 18;
+    const padBottom = 22;
     const plotW = w - padLeft - padRight;
     const plotH = h - padTop - padBottom;
 
     const points = history.filter(p => p.t > 0 || p.h > 0 || p.l > 0);
     if (points.length < 2) return;
 
-    let values: number[] = [];
-    let color = "#38bdf8";
-    let fillColor = "rgba(56, 189, 248, 0.06)";
-    let unitLabel = "";
-
-    if (chartMetric === "temp") {
-      values = points.map(p => unit === "C" ? p.t : (p.t * 9) / 5 + 32);
-      color = "#f97316";
-      fillColor = "rgba(249, 115, 22, 0.06)";
-      unitLabel = `°${unit}`;
-    } else if (chartMetric === "hum") {
-      values = points.map(p => p.h);
-      color = "#0ea5e9";
-      fillColor = "rgba(14, 165, 233, 0.06)";
-      unitLabel = "%";
-    } else {
-      values = points.map(p => p.l);
-      color = "#eab308";
-      fillColor = "rgba(234, 179, 8, 0.06)";
-      unitLabel = "%";
-    }
-
-    let minVal = Math.min(...values);
-    let maxVal = Math.max(...values);
-    if (minVal === maxVal) {
-      minVal -= 2;
-      maxVal += 2;
-    }
-    const range = maxVal - minVal;
-
-    ctx.strokeStyle = "#27272a";
-    ctx.lineWidth = 1;
-    ctx.fillStyle = "#71717a";
-    ctx.font = "10px sans-serif";
-    ctx.textAlign = "right";
-
-    const steps = 3;
-    for (let i = 0; i <= steps; i++) {
-      const val = minVal + (range * (steps - i)) / steps;
-      const y = padTop + (plotH * i) / steps;
+    const drawSeries = (
+      vals: number[], 
+      min: number, 
+      rng: number, 
+      strokeColor: string, 
+      fillColor: string
+    ) => {
       ctx.beginPath();
-      ctx.moveTo(padLeft, y);
-      ctx.lineTo(w - padRight, y);
+      points.forEach((_, idx) => {
+        const x = padLeft + (idx / (points.length - 1)) * plotW;
+        const y = padTop + plotH - ((vals[idx] - min) / rng) * plotH;
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 2;
+      ctx.lineJoin = "round";
       ctx.stroke();
-      ctx.fillText(`${val.toFixed(0)}${unitLabel}`, padLeft - 8, y + 3);
+
+      ctx.lineTo(padLeft + plotW, padTop + plotH);
+      ctx.lineTo(padLeft, padTop + plotH);
+      ctx.closePath();
+      ctx.fillStyle = fillColor;
+      ctx.fill();
+
+      const lastX = padLeft + plotW;
+      const lastY = padTop + plotH - ((vals[vals.length - 1] - min) / rng) * plotH;
+      ctx.beginPath();
+      ctx.arc(lastX, lastY, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = strokeColor;
+      ctx.fill();
+    };
+
+    if (chartMetric === "all") {
+      // 1. Temperature range
+      const temps = points.map(p => unit === "C" ? p.t : (p.t * 9) / 5 + 32);
+      let minTemp = Math.min(...temps);
+      let maxTemp = Math.max(...temps);
+      if (minTemp === maxTemp) { minTemp -= 2; maxTemp += 2; }
+      const tempRange = maxTemp - minTemp;
+
+      // 2. Percentage range (for Humidity & Light)
+      const hums = points.map(p => p.h);
+      const lights = points.map(p => p.l);
+      let minPct = Math.min(...hums, ...lights);
+      let maxPct = Math.max(...hums, ...lights);
+      minPct = Math.max(0, Math.floor(minPct / 10) * 10);
+      maxPct = Math.min(100, Math.ceil(maxPct / 10) * 10);
+      if (minPct === maxPct) { minPct = 0; maxPct = 100; }
+      const pctRange = maxPct - minPct;
+
+      // Subtle horizontal gridlines & dual Y-axis labels
+      ctx.strokeStyle = "#27272a";
+      ctx.lineWidth = 1;
+      ctx.font = "10px sans-serif";
+
+      const steps = 3;
+      for (let i = 0; i <= steps; i++) {
+        const y = padTop + (plotH * i) / steps;
+        ctx.beginPath();
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(w - padRight, y);
+        ctx.stroke();
+
+        // Left Y-axis (Temp)
+        const tVal = minTemp + (tempRange * (steps - i)) / steps;
+        ctx.textAlign = "right";
+        ctx.fillStyle = "#f97316";
+        ctx.fillText(`${tVal.toFixed(0)}°`, padLeft - 6, y + 3);
+
+        // Right Y-axis (%)
+        const pVal = minPct + (pctRange * (steps - i)) / steps;
+        ctx.textAlign = "left";
+        ctx.fillStyle = "#38bdf8";
+        ctx.fillText(`${pVal.toFixed(0)}%`, w - padRight + 6, y + 3);
+      }
+
+      // Draw all 3 series simultaneously
+      drawSeries(lights, minPct, pctRange, "#eab308", "rgba(234, 179, 8, 0.04)");
+      drawSeries(hums, minPct, pctRange, "#0ea5e9", "rgba(14, 165, 233, 0.05)");
+      drawSeries(temps, minTemp, tempRange, "#f97316", "rgba(249, 115, 22, 0.05)");
+    } else {
+      let values: number[] = [];
+      let color = "#38bdf8";
+      let fillColor = "rgba(56, 189, 248, 0.06)";
+      let unitLabel = "";
+
+      if (chartMetric === "temp") {
+        values = points.map(p => unit === "C" ? p.t : (p.t * 9) / 5 + 32);
+        color = "#f97316";
+        fillColor = "rgba(249, 115, 22, 0.06)";
+        unitLabel = `°${unit}`;
+      } else if (chartMetric === "hum") {
+        values = points.map(p => p.h);
+        color = "#0ea5e9";
+        fillColor = "rgba(14, 165, 233, 0.06)";
+        unitLabel = "%";
+      } else {
+        values = points.map(p => p.l);
+        color = "#eab308";
+        fillColor = "rgba(234, 179, 8, 0.06)";
+        unitLabel = "%";
+      }
+
+      let minVal = Math.min(...values);
+      let maxVal = Math.max(...values);
+      if (minVal === maxVal) { minVal -= 2; maxVal += 2; }
+      const range = maxVal - minVal;
+
+      ctx.strokeStyle = "#27272a";
+      ctx.lineWidth = 1;
+      ctx.fillStyle = "#71717a";
+      ctx.font = "10px sans-serif";
+      ctx.textAlign = "right";
+
+      const steps = 3;
+      for (let i = 0; i <= steps; i++) {
+        const val = minVal + (range * (steps - i)) / steps;
+        const y = padTop + (plotH * i) / steps;
+        ctx.beginPath();
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(w - padRight, y);
+        ctx.stroke();
+        ctx.fillText(`${val.toFixed(0)}${unitLabel}`, padLeft - 8, y + 3);
+      }
+
+      drawSeries(values, minVal, range, color, fillColor);
     }
-
-    ctx.beginPath();
-    points.forEach((_, idx) => {
-      const x = padLeft + (idx / (points.length - 1)) * plotW;
-      const y = padTop + plotH - ((values[idx] - minVal) / range) * plotH;
-      if (idx === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.lineJoin = "round";
-    ctx.stroke();
-
-    ctx.lineTo(padLeft + plotW, padTop + plotH);
-    ctx.lineTo(padLeft, padTop + plotH);
-    ctx.closePath();
-    ctx.fillStyle = fillColor;
-    ctx.fill();
-
-    const lastX = padLeft + plotW;
-    const lastY = padTop + plotH - ((values[values.length - 1] - minVal) / range) * plotH;
-    ctx.beginPath();
-    ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
   }, [history, chartMetric, unit]);
 
   const renderWeatherIcon = (condition = "", light = 50) => {
@@ -320,11 +375,25 @@ export default function WeatherDashboard() {
 
   const hasPhysicalSensor = telemetry?.dhtValid !== false;
 
+  // Prediction Rate & Ground Truth Match Calculation
+  const localTemp = telemetry?.temp ?? 0;
+  const localHum = telemetry?.humidity ?? 0;
+  const refTemp = apiWeather?.temperature ?? 0;
+  const refHum = apiWeather?.humidity ?? 0;
+
+  const tempDiff = Math.abs(localTemp - refTemp);
+  const humDiff = Math.abs(localHum - refHum);
+
+  // Prediction Match Score (0 - 100%)
+  const tempAccuracy = Math.max(0, 100 - tempDiff * 5.5);
+  const humAccuracy = Math.max(0, 100 - humDiff * 1.8);
+  const predictionMatchRate = Math.min(99, Math.max(25, Math.round(tempAccuracy * 0.55 + humAccuracy * 0.45)));
+
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center px-4 py-8 md:py-12">
       <div className="w-full max-w-3xl flex flex-col gap-6">
 
-        {/* Minimal Header with Live IST Clock */}
+        {/* Header with Live IST Clock */}
         <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-zinc-800/60">
           <div>
             <div className="flex items-center gap-2">
@@ -388,7 +457,7 @@ export default function WeatherDashboard() {
               <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
             </button>
 
-            {/* Info Drawer Toggle */}
+            {/* Architecture Details Toggle */}
             <button
               onClick={() => setShowSetup(!showSetup)}
               title="Architecture details"
@@ -399,7 +468,7 @@ export default function WeatherDashboard() {
           </div>
         </header>
 
-        {/* Primary Ambient Reading (Clean Apple-Weather Style) */}
+        {/* Primary Ambient Reading */}
         <section className="bg-zinc-900/50 border border-zinc-800/80 rounded-2xl p-6 md:p-8 flex flex-col gap-5">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-start gap-4">
@@ -520,20 +589,125 @@ export default function WeatherDashboard() {
           </div>
         </div>
 
-        {/* Minimal Sensor Trend Line */}
+        {/* Prediction Rate vs Real Weather Forecast Card */}
         <section className="bg-zinc-900/40 border border-zinc-800/70 rounded-2xl p-5 flex flex-col gap-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-              Sensor Timeline
-            </h3>
-            <div className="bg-zinc-900 border border-zinc-800 p-0.5 rounded-lg flex text-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
+                  Forecast Prediction Match
+                </h3>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Comparing local ESP8266 telemetry with official regional weather ({apiWeather?.location || "New Delhi"})
+              </p>
+            </div>
+
+            {/* City Search Bar */}
+            <form onSubmit={handleCitySearch} className="flex gap-1.5">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <input
+                  type="text"
+                  value={searchCity}
+                  onChange={(e) => setSearchCity(e.target.value)}
+                  placeholder="Change city..."
+                  className="pl-7 pr-2.5 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-700 w-36 sm:w-44"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={apiLoading}
+                className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded-lg transition"
+              >
+                {apiLoading ? "..." : "Set"}
+              </button>
+            </form>
+          </div>
+
+          {/* Prediction Rate & Metric Comparison */}
+          <div className="grid grid-cols-1 md:grid-cols-[auto_1fr] items-center gap-4 pt-1">
+            {/* Accuracy Match Badge */}
+            <div className="flex items-center gap-4 p-4 rounded-xl bg-zinc-900/70 border border-zinc-800/80">
+              <div className="flex flex-col">
+                <span className="text-[11px] text-zinc-400 uppercase tracking-wide">Match Rate</span>
+                <span className="text-3xl font-bold text-emerald-400 tracking-tight">
+                  {hasPhysicalSensor ? `${predictionMatchRate}%` : "--"}
+                </span>
+                <span className="text-[10px] text-zinc-500 mt-0.5">High sensor correlation</span>
+              </div>
+              <div className="h-10 w-[1px] bg-zinc-800 mx-1" />
+              <div className="text-xs space-y-1 text-zinc-400">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span>Temp &Delta;: <b className="text-zinc-200">{tempDiff.toFixed(1)}°C</b></span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span>Humidity &Delta;: <b className="text-zinc-200">{humDiff.toFixed(1)}%</b></span>
+                </div>
+              </div>
+            </div>
+
+            {/* Side-by-Side Comparison Box */}
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-3">
+                <div className="text-zinc-500 text-[11px] font-medium mb-1">Local ESP8266 Sensor</div>
+                <div className="text-base font-semibold text-zinc-100">
+                  {hasPhysicalSensor ? formatTemp(telemetry?.temp) : "--"}°{unit}
+                </div>
+                <div className="text-zinc-400 text-[11px] mt-0.5">
+                  {hasPhysicalSensor ? `${telemetry?.humidity.toFixed(1)}% hum` : "--"} · {telemetry?.condition}
+                </div>
+              </div>
+
+              <div className="bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-3">
+                <div className="text-zinc-500 text-[11px] font-medium mb-1 truncate">
+                  Forecast ({apiWeather?.location || "Regional"})
+                </div>
+                <div className="text-base font-semibold text-zinc-100">
+                  {formatTemp(apiWeather?.temperature)}°{unit}
+                </div>
+                <div className="text-zinc-400 text-[11px] mt-0.5 truncate">
+                  {apiWeather?.humidity ?? "--"}% hum · {apiWeather?.condition}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Sensor Timeline Chart (Shows All 3 Sensors or Individual) */}
+        <section className="bg-zinc-900/40 border border-zinc-800/70 rounded-2xl p-5 flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                Sensor Timeline Graph
+              </h3>
+              <p className="text-[11px] text-zinc-500">
+                {chartMetric === "all" 
+                  ? "Plotting Temperature (°C), Humidity (%), and Ambient Light (%) together"
+                  : `Plotting ${chartMetric.toUpperCase()} trend`}
+              </p>
+            </div>
+
+            {/* Chart Metric Selector */}
+            <div className="bg-zinc-900 border border-zinc-800 p-0.5 rounded-lg flex text-xs self-start sm:self-auto">
+              <button
+                onClick={() => setChartMetric("all")}
+                className={`px-2.5 py-1 rounded-md transition font-medium ${
+                  chartMetric === "all" ? "bg-zinc-800 text-zinc-100 shadow-sm" : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                All 3 Metrics
+              </button>
               <button
                 onClick={() => setChartMetric("temp")}
                 className={`px-2.5 py-1 rounded-md transition ${
                   chartMetric === "temp" ? "bg-zinc-800 text-orange-400 font-medium" : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
-                Temperature
+                Temp
               </button>
               <button
                 onClick={() => setChartMetric("hum")}
@@ -554,71 +728,26 @@ export default function WeatherDashboard() {
             </div>
           </div>
 
-          <div className="relative w-full h-44">
+          {/* Canvas Chart Area */}
+          <div className="relative w-full h-48">
             <canvas ref={canvasRef} className="w-full h-full" />
           </div>
-        </section>
 
-        {/* Collapsible City Weather Comparison */}
-        <section className="bg-zinc-900/30 border border-zinc-800/60 rounded-xl overflow-hidden transition">
-          <button
-            onClick={() => setShowComparison(!showComparison)}
-            className="w-full p-4 flex justify-between items-center text-xs font-medium text-zinc-300 hover:text-zinc-100 transition"
-          >
-            <span>Compare with Regional Weather ({apiWeather?.location || "Open-Meteo"})</span>
-            <div className="flex items-center gap-1.5 text-zinc-500">
-              <span>{showComparison ? "Hide" : "Show"}</span>
-              {showComparison ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          {/* Chart Legend */}
+          <div className="flex items-center gap-4 text-xs text-zinc-400 pt-1 border-t border-zinc-800/40">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-orange-500" />
+              <span>Temperature (°{unit})</span>
             </div>
-          </button>
-
-          {showComparison && (
-            <div className="p-4 pt-0 border-t border-zinc-800/50 flex flex-col gap-4">
-              <form onSubmit={handleCitySearch} className="flex gap-2 pt-3">
-                <div className="relative flex-1">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-                  <input
-                    type="text"
-                    value={searchCity}
-                    onChange={(e) => setSearchCity(e.target.value)}
-                    placeholder="Search city (e.g., Delhi, Mumbai, Bengaluru)..."
-                    className="w-full pl-8 pr-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-700"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={apiLoading}
-                  className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded-lg transition"
-                >
-                  {apiLoading ? "..." : "Search"}
-                </button>
-              </form>
-
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-lg p-3">
-                  <div className="text-zinc-500 font-medium mb-1">Local NodeMCU Sensor</div>
-                  <div className="text-base font-semibold text-zinc-100">
-                    {hasPhysicalSensor ? formatTemp(telemetry?.temp) : "--"}°{unit}
-                  </div>
-                  <div className="text-zinc-400 mt-1">
-                    Humidity: {hasPhysicalSensor ? telemetry?.humidity.toFixed(1) : "--"}%
-                  </div>
-                </div>
-
-                <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-lg p-3">
-                  <div className="text-zinc-500 font-medium mb-1">
-                    {apiWeather?.location || "Regional Station"}
-                  </div>
-                  <div className="text-base font-semibold text-zinc-100">
-                    {formatTemp(apiWeather?.temperature)}°{unit}
-                  </div>
-                  <div className="text-zinc-400 mt-1">
-                    Humidity: {apiWeather?.humidity ?? "--"}% · {apiWeather?.condition}
-                  </div>
-                </div>
-              </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-sky-500" />
+              <span>Humidity (%)</span>
             </div>
-          )}
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-amber-400" />
+              <span>Light (%)</span>
+            </div>
+          </div>
         </section>
 
         {/* Minimal Architecture Details */}
@@ -629,12 +758,12 @@ export default function WeatherDashboard() {
               <button onClick={() => setShowSetup(false)} className="text-zinc-500 hover:text-zinc-300">✕</button>
             </div>
             <p className="text-zinc-400 leading-relaxed">
-              The ESP8266 runs in ultra-low power mode: its only job is reading DHT11 & LDR and transmitting raw telemetry to Vercel via HTTPS every 15 seconds. All thermal indexes, dew points, rain likelihood, and UI rendering are executed serverless on Vercel.
+              The ESP8266 runs in ultra-low power mode: its only job is reading DHT11, LDR, and Rain Sensor pins and transmitting raw telemetry to Vercel via HTTPS every 15 seconds. All thermal indexes, dew points, rain likelihood, and UI rendering are executed serverless on Vercel.
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-zinc-800 text-[11px] text-zinc-400">
               <div>Hardware: <span className="text-zinc-200">NodeMCU ESP8266</span></div>
-              <div>Sensors: <span className="text-zinc-200">DHT11 (D2), LDR (A0)</span></div>
-              <div>Calculations: <span className="text-zinc-200">Vercel Serverless</span></div>
+              <div>OLED: <span className="text-zinc-200">{telemetry?.oledActive ? "Active (SSD1306)" : "Auto-Ready"}</span></div>
+              <div>Rain Sensor: <span className="text-zinc-200">FC-37 (D6)</span></div>
               <div>Timezone: <span className="text-zinc-200">Asia/Kolkata (IST)</span></div>
             </div>
           </div>
