@@ -13,6 +13,8 @@ interface TelemetryData {
   light: number;
   rawAdc?: number;
   dhtValid?: boolean;
+  rainDetected?: boolean;
+  oledActive?: boolean;
   heatIndex: number;
   dewPoint: number;
   rainProb: number;
@@ -492,20 +494,28 @@ export default function WeatherDashboard() {
             </div>
           </div>
 
-          {/* Rain Probability */}
+          {/* Rain Sensor & Likelihood */}
           <div className="bg-zinc-900/40 border border-zinc-800/70 rounded-xl p-4 flex flex-col justify-between">
             <div className="flex items-center justify-between text-zinc-400 text-xs">
-              <span>Rain Likelihood</span>
-              <CloudRain className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Rain Status</span>
+              <CloudRain className={`w-3.5 h-3.5 ${telemetry?.rainDetected ? "text-sky-400 animate-pulse" : "text-zinc-500"}`} />
             </div>
             <div className="my-2">
-              <span className="text-2xl font-medium text-zinc-100">
-                {telemetry?.rainProb !== undefined ? telemetry.rainProb : "--"}
-              </span>
-              <span className="text-xs text-zinc-500 ml-1">%</span>
+              {telemetry?.rainDetected ? (
+                <span className="text-xl font-semibold text-sky-400">
+                  Raining
+                </span>
+              ) : (
+                <>
+                  <span className="text-2xl font-medium text-zinc-100">
+                    {telemetry?.rainProb !== undefined ? telemetry.rainProb : "--"}
+                  </span>
+                  <span className="text-xs text-zinc-500 ml-1">% chance</span>
+                </>
+              )}
             </div>
             <div className="text-[11px] text-zinc-400">
-              Cloud-computed forecast
+              {telemetry?.rainDetected ? "🌧️ Active water detected" : "FC-37 sensor: Dry"}
             </div>
           </div>
         </div>
