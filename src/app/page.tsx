@@ -136,6 +136,7 @@ export default function WeatherDashboard() {
 
   // 7-Day Benchmark state
   const [sevenDayMetric, setSevenDayMetric] = useState<"match" | "temp" | "hum">("match");
+  const [benchmarkGraphType, setBenchmarkGraphType] = useState<"line" | "bar">("line");
   const [benchmarkDays, setBenchmarkDays] = useState<Array<BenchmarkDay & { dayName: string; dateStr: string }>>(() => {
     return SEVEN_DAY_BENCHMARK.map((b, idx) => ({
       ...b,
@@ -484,6 +485,132 @@ export default function WeatherDashboard() {
   const humAccuracy = Math.max(0, 100 - humDiff * 1.8);
   const predictionMatchRate = Math.min(99, Math.max(25, Math.round(tempAccuracy * 0.55 + humAccuracy * 0.45)));
 
+  // 7-Day Academic Scientific SVG Line Plot Coordinate Computations
+  const svgW = 840;
+  const svgH = 320;
+  const padL = 64;
+  const padR = 48;
+  const padT = 38;
+  const padB = 46;
+  const plotW = svgW - padL - padR; // 728
+  const plotH = svgH - padT - padB; // 236
+
+  const getLineX = (idx: number) => padL + (idx / 6) * plotW;
+
+  // Correlation Y (80% to 100%)
+  const getLineMatchY = (val: number) => padT + plotH - ((val - 80) / 20) * plotH;
+
+  // Temperature Y (20°C to 38°C, or 68°F to 100.4°F)
+  const minTempPlot = unit === "C" ? 20 : 68;
+  const maxTempPlot = unit === "C" ? 38 : 100.4;
+  const tempPlotRange = maxTempPlot - minTempPlot;
+  const getLineTempY = (valC: number) => {
+    const val = unit === "C" ? valC : (valC * 9) / 5 + 32;
+    return padT + plotH - ((val - minTempPlot) / tempPlotRange) * plotH;
+  };
+
+  // Humidity Y (40% to 90%)
+  const minHumPlot = 40;
+  const maxHumPlot = 90;
+  const humPlotRange = maxHumPlot - minHumPlot;
+  const getLineHumY = (val: number) => padT + plotH - ((val - minHumPlot) / humPlotRange) * plotH;
+
+  // Correlation Points & Path
+  const matchPoints = benchmarkDays.map((d, i) => ({
+    x: getLineX(i),
+    y: getLineMatchY(d.accuracy),
+    val: d.accuracy,
+    day: d.dayName,
+    date: d.dateStr,
+  }));
+  const matchLinePath = matchPoints
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+    .join(" ");
+  const matchAreaPath = matchPoints.length > 0
+    ? `${matchLinePath} L ${matchPoints[matchPoints.length - 1].x.toFixed(1)} ${padT + plotH} L ${matchPoints[0].x.toFixed(1)} ${padT + plotH} Z`
+    : "";
+
+  // Temp Points & Paths
+  const espTempPoints = benchmarkDays.map((d, i) => ({
+    x: getLineX(i),
+    yAvg: getLineTempY(d.espTemp.avg),
+    yMin: getLineTempY(d.espTemp.min),
+    yMax: getLineTempY(d.espTemp.max),
+    avg: d.espTemp.avg,
+    min: d.espTemp.min,
+    max: d.espTemp.max,
+  }));
+  const apiTempPoints = benchmarkDays.map((d, i) => ({
+    x: getLineX(i),
+    yAvg: getLineTempY(d.apiTemp.avg),
+    avg: d.apiTemp.avg,
+  }));
+  const espTempLine = espTempPoints
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.yAvg.toFixed(1)}`)
+    .join(" ");
+  const apiTempLine = apiTempPoints
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.yAvg.toFixed(1)}`)
+    .join(" ");
+  const tempDeltaPolygon = [
+    ...espTempPoints.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.yAvg.toFixed(1)}`),
+    ...[...apiTempPoints].reverse().map(p => `L ${p.x.toFixed(1)} ${p.yAvg.toFixed(1)}`),
+    "Z"
+  ].join(" ");
+
+  // Humidity Points & Paths
+  const espHumPoints = benchmarkDays.map((d, i) => ({
+    x: getLineX(i),
+    yAvg: getLineHumY(d.espHum.avg),
+    yMin: getLineHumY(d.espHum.min),
+    yMax: getLineHumY(d.espHum.max),
+    avg: d.espHum.avg,
+  }));
+  const apiHumPoints = benchmarkDays.map((d, i) => ({
+    x: getLineX(i),
+    yAvg: getLineHumY(d.apiHum.avg),
+    avg: d.apiHum.avg,
+  }));
+  const espHumLine = espHumPoints
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.yAvg.toFixed(1)}`)
+    .join(" ");
+  const apiHumLine = apiHumPoints
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.yAvg.toFixed(1)}`)
+    .join(" ");
+  const humDeltaPolygon = [
+    ...espHumPoints.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.yAvg.toFixed(1)}`),
+    ...[...apiHumPoints].reverse().map(p => `L ${p.x.toFixed(1)} ${p.yAvg.toFixed(1)}`),
+    "Z"
+  ].join(" ");
+
+  // Y-Axis Ticks
+  const matchYTicks = [
+    { label: "100%", y: getLineMatchY(100), highlight: false },
+    { label: "95%", y: getLineMatchY(95), highlight: false },
+    { label: "90%", y: getLineMatchY(90), highlight: true },
+    { label: "85%", y: getLineMatchY(85), highlight: false },
+    { label: "80%", y: getLineMatchY(80), highlight: false },
+  ];
+
+  const tempYTicks = [
+    { label: unit === "C" ? "38°C" : "100°F", y: getLineTempY(38), highlight: false },
+    { label: unit === "C" ? "34°C" : "93°F", y: getLineTempY(34), highlight: false },
+    { label: unit === "C" ? "30°C" : "86°F", y: getLineTempY(30), highlight: false },
+    { label: unit === "C" ? "26°C" : "79°F", y: getLineTempY(26), highlight: false },
+    { label: unit === "C" ? "22°C" : "72°F", y: getLineTempY(22), highlight: false },
+    { label: unit === "C" ? "20°C" : "68°F", y: getLineTempY(20), highlight: false },
+  ];
+
+  const humYTicks = [
+    { label: "90%", y: getLineHumY(90), highlight: false },
+    { label: "80%", y: getLineHumY(80), highlight: false },
+    { label: "70%", y: getLineHumY(70), highlight: false },
+    { label: "60%", y: getLineHumY(60), highlight: false },
+    { label: "50%", y: getLineHumY(50), highlight: false },
+    { label: "40%", y: getLineHumY(40), highlight: false },
+  ];
+
+  const currentYTicks = sevenDayMetric === "match" ? matchYTicks : sevenDayMetric === "temp" ? tempYTicks : humYTicks;
+
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center px-4 py-8 md:py-12">
       <div className="w-full max-w-3xl flex flex-col gap-6">
@@ -803,12 +930,37 @@ export default function WeatherDashboard() {
               </p>
             </div>
 
-            {/* Metric Mode Selector */}
-            <div className="flex items-center gap-2 self-start sm:self-auto">
+            {/* Metric Mode & Visualization Style Selectors */}
+            <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+              {/* Line vs Bar Switcher */}
+              <div className="bg-zinc-900 border border-zinc-700/90 p-0.5 rounded-lg flex text-xs">
+                <button
+                  onClick={() => setBenchmarkGraphType("line")}
+                  className={`px-2.5 py-1 rounded transition font-mono text-xs font-semibold ${
+                    benchmarkGraphType === "line"
+                      ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-600/70"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  📈 Line Plot (IEEE)
+                </button>
+                <button
+                  onClick={() => setBenchmarkGraphType("bar")}
+                  className={`px-2.5 py-1 rounded transition font-mono text-xs font-semibold ${
+                    benchmarkGraphType === "bar"
+                      ? "bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-600/70"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  📊 Bar Chart
+                </button>
+              </div>
+
+              {/* Metric Selector */}
               <div className="bg-zinc-900 border border-zinc-700/90 p-0.5 rounded-lg flex text-xs">
                 <button
                   onClick={() => setSevenDayMetric("match")}
-                  className={`px-3 py-1 rounded transition font-mono text-xs font-semibold ${
+                  className={`px-2.5 py-1 rounded transition font-mono text-xs font-semibold ${
                     sevenDayMetric === "match" ? "bg-emerald-950 text-emerald-300 border border-emerald-600/70 shadow-sm" : "text-zinc-400 hover:text-zinc-200"
                   }`}
                 >
@@ -816,15 +968,15 @@ export default function WeatherDashboard() {
                 </button>
                 <button
                   onClick={() => setSevenDayMetric("temp")}
-                  className={`px-3 py-1 rounded transition font-mono text-xs font-semibold ${
+                  className={`px-2.5 py-1 rounded transition font-mono text-xs font-semibold ${
                     sevenDayMetric === "temp" ? "bg-orange-950 text-orange-300 border border-orange-600/70 shadow-sm" : "text-zinc-400 hover:text-zinc-200"
                   }`}
                 >
-                  Temp (Max/Min/Avg)
+                  Temp (°{unit})
                 </button>
                 <button
                   onClick={() => setSevenDayMetric("hum")}
-                  className={`px-3 py-1 rounded transition font-mono text-xs font-semibold ${
+                  className={`px-2.5 py-1 rounded transition font-mono text-xs font-semibold ${
                     sevenDayMetric === "hum" ? "bg-blue-950 text-blue-300 border border-blue-600/70 shadow-sm" : "text-zinc-400 hover:text-zinc-200"
                   }`}
                 >
@@ -840,214 +992,741 @@ export default function WeatherDashboard() {
             <span className="text-emerald-400 font-semibold">PEARSON r = 0.941 · MAE = 0.74°C</span>
           </div>
 
-          {/* Scientific Graph Frame with Calibrated Coordinate Axes */}
-          <div className="bg-[#050608] border border-zinc-800 rounded-lg p-4 pt-6 relative flex flex-col gap-2">
+          {/* Scientific Graph Frame */}
+          <div className="bg-[#050608] border border-zinc-800 rounded-lg p-4 pt-5 relative flex flex-col gap-3">
             {/* Graph Legend & Status Header */}
             <div className="flex flex-wrap items-center justify-between text-xs text-zinc-300 pb-2 border-b border-zinc-900 gap-2">
-              <div className="flex items-center gap-3 text-[11px] font-mono">
+              <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono">
                 {sevenDayMetric === "match" && (
                   <>
                     <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 bg-[#059669] border border-[#10b981] rounded-xs" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#10b981] border border-[#34d399]" />
                       <span>&ge;94% Optimal Match (4 Days)</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 bg-[#0284c7] border border-[#38bdf8] rounded-xs" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#0284c7] border border-[#38bdf8]" />
                       <span>90–95% High Correlation (2 Days)</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 bg-[#d97706] border border-[#fbbf24] rounded-xs" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#d97706] border border-[#fbbf24]" />
                       <span>88.4% Micro-climate Variance (1 Day)</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-amber-400">
+                      <span className="w-3 border-t-2 border-dashed border-amber-400 inline-block" />
+                      <span>90% Threshold</span>
                     </div>
                   </>
                 )}
                 {sevenDayMetric === "temp" && (
                   <>
                     <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 bg-[#ea580c] border border-[#f97316] rounded-xs" />
-                      <span>ESP8266 Sensor Ground-Truth</span>
+                      <span className="w-3 h-0.5 bg-[#ea580c]" />
+                      <span className="w-2 h-2 rounded-full bg-[#ea580c]" />
+                      <span>ESP8266 Sensor (with Min-Max Whiskers)</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 bg-[#2563eb] border border-[#60a5fa] rounded-xs" />
+                      <span className="w-3 border-t-2 border-dashed border-[#3b82f6] inline-block" />
+                      <span className="w-2 h-2 bg-[#1e3a8a] border border-[#60a5fa]" />
                       <span>Open-Meteo Satellite Model</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-2 bg-orange-500/20 border border-orange-500/40 inline-block rounded-xs" />
+                      <span>Variance Band (&Delta;T)</span>
                     </div>
                   </>
                 )}
                 {sevenDayMetric === "hum" && (
                   <>
                     <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 bg-[#0891b2] border border-[#22d3ee] rounded-xs" />
+                      <span className="w-3 h-0.5 bg-[#06b6d4]" />
+                      <span className="w-2 h-2 rounded-full bg-[#06b6d4]" />
                       <span>ESP8266 Humidity Sensor</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 bg-[#4f46e5] border border-[#818cf8] rounded-xs" />
+                      <span className="w-3 border-t-2 border-dashed border-[#818cf8] inline-block" />
+                      <span className="w-2 h-2 bg-[#312e81] border border-[#818cf8]" />
                       <span>Open-Meteo Regional Model</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-2 bg-cyan-500/20 border border-cyan-500/40 inline-block rounded-xs" />
+                      <span>Moisture Band (&Delta;H)</span>
                     </div>
                   </>
                 )}
               </div>
-              <span className="text-[10px] font-mono text-zinc-500">Scale: Calibrated Engineering Axis</span>
+              <span className="text-[10px] font-mono text-zinc-500">
+                {benchmarkGraphType === "line" ? "Format: Continuous Multi-Series Vector Plot" : "Format: Calibrated Engineering Axis"}
+              </span>
             </div>
 
-            {/* Coordinate Axis Canvas Area */}
-            <div className="relative flex pt-4 pb-2 h-64 select-none">
-              {/* Left Y-Axis Labels */}
-              <div className="w-12 pr-2 text-right font-mono text-[10px] text-zinc-400 flex flex-col justify-between select-none">
-                {sevenDayMetric === "match" && (
-                  <>
-                    <span>100%</span>
-                    <span>95%</span>
-                    <span className="text-amber-400 font-bold">90%</span>
-                    <span>85%</span>
-                    <span>80%</span>
-                  </>
-                )}
-                {sevenDayMetric === "temp" && (
-                  <>
-                    <span>40°</span>
-                    <span>35°</span>
-                    <span>30°</span>
-                    <span>25°</span>
-                    <span>20°</span>
-                  </>
-                )}
-                {sevenDayMetric === "hum" && (
-                  <>
-                    <span>100%</span>
-                    <span>80%</span>
-                    <span>60%</span>
-                    <span>40%</span>
-                    <span>20%</span>
-                  </>
-                )}
-              </div>
+            {/* LINE GRAPH VIEW (IEEE Publication Grade Vector SVG) */}
+            {benchmarkGraphType === "line" ? (
+              <div className="w-full overflow-x-auto py-1">
+                <div className="min-w-[680px] w-full">
+                  <svg
+                    viewBox={`0 0 ${svgW} ${svgH}`}
+                    className="w-full h-auto select-none"
+                    style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
+                  >
+                    <defs>
+                      {/* Gradient fill under Accuracy line */}
+                      <linearGradient id="matchLineGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
+                        <stop offset="60%" stopColor="#10b981" stopOpacity="0.08" />
+                        <stop offset="100%" stopColor="#10b981" stopOpacity="0.00" />
+                      </linearGradient>
 
-              {/* Chart Plot Area with Gridlines */}
-              <div className="relative flex-1 border-l-2 border-b-2 border-zinc-600">
-                {/* Horizontal Gridlines */}
-                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
-                  <div className="w-full border-t border-zinc-800" />
-                  <div className="w-full border-t border-zinc-800/80 border-dashed" />
-                  {/* 90% Acceptance Threshold line */}
-                  <div className="w-full border-t border-amber-500/60 border-dashed relative">
+                      {/* Gradient for temp delta */}
+                      <linearGradient id="tempDeltaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#f97316" stopOpacity="0.25" />
+                        <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.08" />
+                      </linearGradient>
+
+                      {/* Gradient for hum delta */}
+                      <linearGradient id="humDeltaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.22" />
+                        <stop offset="100%" stopColor="#818cf8" stopOpacity="0.06" />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Outer Plot Background Frame */}
+                    <rect
+                      x={padL}
+                      y={padT}
+                      width={plotW}
+                      height={plotH}
+                      fill="#050608"
+                      stroke="#3f3f46"
+                      strokeWidth="1"
+                    />
+
+                    {/* Optimal Tolerance Zone Shading for Match Mode (>90%) */}
                     {sevenDayMetric === "match" && (
-                      <span className="absolute right-2 -top-2.5 text-[9px] font-mono text-amber-400/90 bg-black/80 px-1 rounded">
-                        --- Acceptance Threshold (90%) ---
-                      </span>
+                      <rect
+                        x={padL}
+                        y={padT}
+                        width={plotW}
+                        height={getLineMatchY(90) - padT}
+                        fill="#10b981"
+                        fillOpacity="0.04"
+                      />
+                    )}
+
+                    {/* Horizontal Gridlines & Left Y-Axis Ticks */}
+                    {currentYTicks.map((tick, idx) => {
+                      const yPos = tick.y;
+                      const isHighlight = tick.highlight;
+
+                      return (
+                        <g key={idx}>
+                          {/* Gridline */}
+                          <line
+                            x1={padL}
+                            y1={yPos}
+                            x2={padL + plotW}
+                            y2={yPos}
+                            stroke={isHighlight ? "#f59e0b" : "#27272a"}
+                            strokeDasharray={isHighlight ? "6 3" : "3 3"}
+                            strokeWidth={isHighlight ? 1.5 : 1}
+                            strokeOpacity={isHighlight ? 0.85 : 0.7}
+                          />
+                          {/* Tick Mark on Axis */}
+                          <line
+                            x1={padL - 5}
+                            y1={yPos}
+                            x2={padL}
+                            y2={yPos}
+                            stroke={isHighlight ? "#f59e0b" : "#71717a"}
+                            strokeWidth={1.5}
+                          />
+                          {/* Y-Axis Label */}
+                          <text
+                            x={padL - 10}
+                            y={yPos + 4}
+                            textAnchor="end"
+                            fill={isHighlight ? "#f59e0b" : "#a1a1aa"}
+                            fontSize="11"
+                            fontFamily="ui-monospace, monospace"
+                            fontWeight={isHighlight ? 700 : 500}
+                          >
+                            {tick.label}
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* 90% Threshold Label for Match Metric */}
+                    {sevenDayMetric === "match" && (
+                      <text
+                        x={padL + plotW - 12}
+                        y={getLineMatchY(90) - 7}
+                        textAnchor="end"
+                        fill="#fbbf24"
+                        fontSize="10"
+                        fontFamily="ui-monospace, monospace"
+                        fontWeight={600}
+                      >
+                        --- Acceptance Threshold (90.0%) ---
+                      </text>
+                    )}
+
+                    {/* CORRELATION LINE MODE */}
+                    {sevenDayMetric === "match" && (
+                      <>
+                        {/* Shaded Area */}
+                        <path d={matchAreaPath} fill="url(#matchLineGrad)" />
+
+                        {/* Connecting Continuous Trajectory Line */}
+                        <path
+                          d={matchLinePath}
+                          fill="none"
+                          stroke="#10b981"
+                          strokeWidth="2.75"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+
+                        {/* Micro-climate Callout Pointer on Day 4 */}
+                        {matchPoints[3] && (
+                          <g>
+                            <line
+                              x1={matchPoints[3].x}
+                              y1={matchPoints[3].y + 10}
+                              x2={matchPoints[3].x}
+                              y2={matchPoints[3].y + 36}
+                              stroke="#f59e0b"
+                              strokeDasharray="2 2"
+                              strokeWidth="1.2"
+                            />
+                            <rect
+                              x={matchPoints[3].x - 85}
+                              y={matchPoints[3].y + 36}
+                              width="170"
+                              height="22"
+                              rx="4"
+                              fill="#1c1917"
+                              stroke="#d97706"
+                              strokeWidth="1.2"
+                            />
+                            <text
+                              x={matchPoints[3].x}
+                              y={matchPoints[3].y + 51}
+                              textAnchor="middle"
+                              fill="#fbbf24"
+                              fontSize="9.5"
+                              fontWeight={700}
+                              fontFamily="ui-monospace, monospace"
+                            >
+                              MICROCLIMATE DELTA (-5.6%)
+                            </text>
+                          </g>
+                        )}
+
+                        {/* Individual Data Points */}
+                        {matchPoints.map((pt, i) => {
+                          const is88 = pt.val < 90;
+                          const is94Plus = pt.val >= 94;
+                          const nodeColor = is94Plus ? "#10b981" : is88 ? "#f59e0b" : "#38bdf8";
+
+                          return (
+                            <g key={i}>
+                              {/* Outer Glow Ring */}
+                              <circle
+                                cx={pt.x}
+                                cy={pt.y}
+                                r="6.5"
+                                fill="#050608"
+                                stroke={nodeColor}
+                                strokeWidth="2.5"
+                              />
+                              {/* Inner Core */}
+                              <circle cx={pt.x} cy={pt.y} r="2.5" fill={nodeColor} />
+
+                              {/* Monospace Value Readout Above Point */}
+                              <text
+                                x={pt.x}
+                                y={pt.y - 12}
+                                textAnchor="middle"
+                                fill={nodeColor}
+                                fontSize="11.5"
+                                fontFamily="ui-monospace, monospace"
+                                fontWeight={700}
+                              >
+                                {pt.val}%
+                              </text>
+                            </g>
+                          );
+                        })}
+                      </>
+                    )}
+
+                    {/* TEMPERATURE DUAL CURVE MODE */}
+                    {sevenDayMetric === "temp" && (
+                      <>
+                        {/* Shaded Delta Gap Polygon */}
+                        <path d={tempDeltaPolygon} fill="url(#tempDeltaGrad)" />
+
+                        {/* Error Whiskers for ESP8266 Sensor (Min-Max Range) */}
+                        {espTempPoints.map((pt, i) => (
+                          <g key={`whisker-${i}`}>
+                            <line
+                              x1={pt.x}
+                              y1={pt.yMin}
+                              x2={pt.x}
+                              y2={pt.yMax}
+                              stroke="#f97316"
+                              strokeWidth="1.5"
+                              strokeOpacity="0.45"
+                            />
+                            <line
+                              x1={pt.x - 5}
+                              y1={pt.yMin}
+                              x2={pt.x + 5}
+                              y2={pt.yMin}
+                              stroke="#f97316"
+                              strokeWidth="1.5"
+                              strokeOpacity="0.7"
+                            />
+                            <line
+                              x1={pt.x - 5}
+                              y1={pt.yMax}
+                              x2={pt.x + 5}
+                              y2={pt.yMax}
+                              stroke="#f97316"
+                              strokeWidth="1.5"
+                              strokeOpacity="0.7"
+                            />
+                          </g>
+                        ))}
+
+                        {/* Line 2: Open-Meteo Satellite Baseline (Dashed Blue) */}
+                        <path
+                          d={apiTempLine}
+                          fill="none"
+                          stroke="#3b82f6"
+                          strokeWidth="2"
+                          strokeDasharray="5 3"
+                        />
+
+                        {/* Line 1: ESP8266 Ground-Truth Sensor (Solid Orange) */}
+                        <path
+                          d={espTempLine}
+                          fill="none"
+                          stroke="#ea580c"
+                          strokeWidth="2.75"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+
+                        {/* Day 4 Max Divergence Callout */}
+                        {espTempPoints[3] && (
+                          <g>
+                            <line
+                              x1={espTempPoints[3].x}
+                              y1={espTempPoints[3].yAvg - 9}
+                              x2={espTempPoints[3].x}
+                              y2={espTempPoints[3].yAvg - 30}
+                              stroke="#ea580c"
+                              strokeDasharray="2 2"
+                              strokeWidth="1.2"
+                            />
+                            <rect
+                              x={espTempPoints[3].x - 75}
+                              y={espTempPoints[3].yAvg - 52}
+                              width="150"
+                              height="22"
+                              rx="4"
+                              fill="#1c1917"
+                              stroke="#ea580c"
+                              strokeWidth="1.2"
+                            />
+                            <text
+                              x={espTempPoints[3].x}
+                              y={espTempPoints[3].yAvg - 37}
+                              textAnchor="middle"
+                              fill="#fb923c"
+                              fontSize="9.5"
+                              fontWeight={700}
+                              fontFamily="ui-monospace, monospace"
+                            >
+                              MAX OFFSET: ΔT = +1.8°C
+                            </text>
+                          </g>
+                        )}
+
+                        {/* Open-Meteo Square Markers */}
+                        {apiTempPoints.map((pt, i) => (
+                          <g key={`api-${i}`}>
+                            <rect
+                              x={pt.x - 4}
+                              y={pt.yAvg - 4}
+                              width="8"
+                              height="8"
+                              fill="#1e3a8a"
+                              stroke="#60a5fa"
+                              strokeWidth="1.5"
+                            />
+                            <text
+                              x={pt.x}
+                              y={pt.yAvg + 16}
+                              textAnchor="middle"
+                              fill="#93c5fd"
+                              fontSize="9.5"
+                              fontFamily="ui-monospace, monospace"
+                            >
+                              {formatTemp(pt.avg)}°
+                            </text>
+                          </g>
+                        ))}
+
+                        {/* ESP8266 Circle Markers */}
+                        {espTempPoints.map((pt, i) => (
+                          <g key={`esp-${i}`}>
+                            <circle
+                              cx={pt.x}
+                              cy={pt.yAvg}
+                              r="5.5"
+                              fill="#050608"
+                              stroke="#ea580c"
+                              strokeWidth="2.5"
+                            />
+                            <circle cx={pt.x} cy={pt.yAvg} r="2" fill="#ea580c" />
+                            <text
+                              x={pt.x}
+                              y={pt.yAvg - 12}
+                              textAnchor="middle"
+                              fill="#fb923c"
+                              fontSize="11"
+                              fontFamily="ui-monospace, monospace"
+                              fontWeight={700}
+                            >
+                              {formatTemp(pt.avg)}°
+                            </text>
+                          </g>
+                        ))}
+                      </>
+                    )}
+
+                    {/* HUMIDITY DUAL CURVE MODE */}
+                    {sevenDayMetric === "hum" && (
+                      <>
+                        {/* Shaded Delta Gap Polygon */}
+                        <path d={humDeltaPolygon} fill="url(#humDeltaGrad)" />
+
+                        {/* Error Whiskers for ESP8266 Humidity */}
+                        {espHumPoints.map((pt, i) => (
+                          <g key={`hum-whisker-${i}`}>
+                            <line
+                              x1={pt.x}
+                              y1={pt.yMin}
+                              x2={pt.x}
+                              y2={pt.yMax}
+                              stroke="#06b6d4"
+                              strokeWidth="1.5"
+                              strokeOpacity="0.45"
+                            />
+                            <line
+                              x1={pt.x - 5}
+                              y1={pt.yMin}
+                              x2={pt.x + 5}
+                              y2={pt.yMin}
+                              stroke="#06b6d4"
+                              strokeWidth="1.5"
+                              strokeOpacity="0.7"
+                            />
+                            <line
+                              x1={pt.x - 5}
+                              y1={pt.yMax}
+                              x2={pt.x + 5}
+                              y2={pt.yMax}
+                              stroke="#06b6d4"
+                              strokeWidth="1.5"
+                              strokeOpacity="0.7"
+                            />
+                          </g>
+                        ))}
+
+                        {/* Line 2: Open-Meteo Model (Dashed Indigo) */}
+                        <path
+                          d={apiHumLine}
+                          fill="none"
+                          stroke="#6366f1"
+                          strokeWidth="2"
+                          strokeDasharray="5 3"
+                        />
+
+                        {/* Line 1: ESP8266 Sensor (Solid Cyan) */}
+                        <path
+                          d={espHumLine}
+                          fill="none"
+                          stroke="#06b6d4"
+                          strokeWidth="2.75"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+
+                        {/* Open-Meteo Square Markers */}
+                        {apiHumPoints.map((pt, i) => (
+                          <g key={`apihum-${i}`}>
+                            <rect
+                              x={pt.x - 4}
+                              y={pt.yAvg - 4}
+                              width="8"
+                              height="8"
+                              fill="#312e81"
+                              stroke="#a5b4fc"
+                              strokeWidth="1.5"
+                            />
+                            <text
+                              x={pt.x}
+                              y={pt.yAvg + 16}
+                              textAnchor="middle"
+                              fill="#c7d2fe"
+                              fontSize="9.5"
+                              fontFamily="ui-monospace, monospace"
+                            >
+                              {pt.avg}%
+                            </text>
+                          </g>
+                        ))}
+
+                        {/* ESP8266 Circle Markers */}
+                        {espHumPoints.map((pt, i) => (
+                          <g key={`esphum-${i}`}>
+                            <circle
+                              cx={pt.x}
+                              cy={pt.yAvg}
+                              r="5.5"
+                              fill="#050608"
+                              stroke="#06b6d4"
+                              strokeWidth="2.5"
+                            />
+                            <circle cx={pt.x} cy={pt.yAvg} r="2" fill="#06b6d4" />
+                            <text
+                              x={pt.x}
+                              y={pt.yAvg - 12}
+                              textAnchor="middle"
+                              fill="#67e8f9"
+                              fontSize="11"
+                              fontFamily="ui-monospace, monospace"
+                              fontWeight={700}
+                            >
+                              {pt.avg}%
+                            </text>
+                          </g>
+                        ))}
+                      </>
+                    )}
+
+                    {/* X-AXIS BASELINE & DOWNWARD TICKS */}
+                    <line
+                      x1={padL}
+                      y1={padT + plotH}
+                      x2={padL + plotW}
+                      y2={padT + plotH}
+                      stroke="#71717a"
+                      strokeWidth="1.5"
+                    />
+
+                    {benchmarkDays.map((d, i) => {
+                      const xPos = getLineX(i);
+                      return (
+                        <g key={`x-tick-${i}`}>
+                          {/* Tick Mark */}
+                          <line
+                            x1={xPos}
+                            y1={padT + plotH}
+                            x2={xPos}
+                            y2={padT + plotH + 5}
+                            stroke="#71717a"
+                            strokeWidth="1.5"
+                          />
+                          {/* Day Name */}
+                          <text
+                            x={xPos}
+                            y={padT + plotH + 19}
+                            textAnchor="middle"
+                            fill="#f4f4f5"
+                            fontSize="11"
+                            fontFamily="ui-monospace, monospace"
+                            fontWeight={700}
+                          >
+                            {d.dayName}
+                          </text>
+                          {/* Date String */}
+                          <text
+                            x={xPos}
+                            y={padT + plotH + 32}
+                            textAnchor="middle"
+                            fill="#71717a"
+                            fontSize="9.5"
+                            fontFamily="ui-monospace, monospace"
+                          >
+                            {d.dateStr}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+              </div>
+            ) : (
+              /* BAR CHART VIEW (Calibrated Discrete Engineering Bars) */
+              <>
+                <div className="relative flex pt-4 pb-2 h-64 select-none">
+                  {/* Left Y-Axis Labels */}
+                  <div className="w-12 pr-2 text-right font-mono text-[10px] text-zinc-400 flex flex-col justify-between select-none">
+                    {sevenDayMetric === "match" && (
+                      <>
+                        <span>100%</span>
+                        <span>95%</span>
+                        <span className="text-amber-400 font-bold">90%</span>
+                        <span>85%</span>
+                        <span>80%</span>
+                      </>
+                    )}
+                    {sevenDayMetric === "temp" && (
+                      <>
+                        <span>40°</span>
+                        <span>35°</span>
+                        <span>30°</span>
+                        <span>25°</span>
+                        <span>20°</span>
+                      </>
+                    )}
+                    {sevenDayMetric === "hum" && (
+                      <>
+                        <span>100%</span>
+                        <span>80%</span>
+                        <span>60%</span>
+                        <span>40%</span>
+                        <span>20%</span>
+                      </>
                     )}
                   </div>
-                  <div className="w-full border-t border-zinc-800/80 border-dashed" />
-                  <div className="w-full border-t border-zinc-800" />
-                </div>
 
-                {/* 7 Columns */}
-                <div className="relative h-full grid grid-cols-7 items-end z-10 px-2 sm:px-4">
-                  {benchmarkDays.map((d, i) => {
-                    const is88 = d.accuracy < 90;
-                    const isBetween90and95 = d.accuracy >= 90 && d.accuracy < 94;
-                    const is94Plus = d.accuracy >= 94;
-
-                    // Match height scaled from 80% to 100%
-                    const matchHeight = Math.min(100, Math.max(12, ((d.accuracy - 80) / (100 - 80)) * 100));
-
-                    // Temp height scaled from 15C to 40C
-                    const espTempHeight = Math.min(100, Math.max(15, ((d.espTemp.avg - 15) / (40 - 15)) * 100));
-                    const apiTempHeight = Math.min(100, Math.max(15, ((d.apiTemp.avg - 15) / (40 - 15)) * 100));
-
-                    // Hum height scaled 0 to 100
-                    const espHumHeight = d.espHum.avg;
-                    const apiHumHeight = d.apiHum.avg;
-
-                    return (
-                      <div key={i} className="flex flex-col items-center h-full justify-end group">
-                        {/* MATCH ACCURACY BAR VIEW */}
+                  {/* Chart Plot Area with Gridlines */}
+                  <div className="relative flex-1 border-l-2 border-b-2 border-zinc-600">
+                    {/* Horizontal Gridlines */}
+                    <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+                      <div className="w-full border-t border-zinc-800" />
+                      <div className="w-full border-t border-zinc-800/80 border-dashed" />
+                      {/* 90% Acceptance Threshold line */}
+                      <div className="w-full border-t border-amber-500/60 border-dashed relative">
                         {sevenDayMetric === "match" && (
-                          <div className="w-full flex flex-col items-center h-full justify-end">
-                            {/* Scientific Value Callout */}
-                            <span className={`text-[10px] sm:text-xs font-mono font-bold mb-1 tracking-tight ${
-                              is94Plus ? "text-emerald-400" : isBetween90and95 ? "text-sky-300" : "text-amber-400"
-                            }`}>
-                              {d.accuracy}%
-                            </span>
-
-                            {/* Solid Engineering Bar (Flat scientific look, no fuzzy gradients) */}
-                            <div className="w-full max-w-[34px] sm:max-w-[42px] flex flex-col justify-end h-full">
-                              <div
-                                style={{ height: `${matchHeight}%` }}
-                                className={`w-full rounded-t-sm shadow-md transition-all ${
-                                  is94Plus
-                                    ? "bg-[#059669] border-t-2 border-x border-[#10b981]"
-                                    : isBetween90and95
-                                    ? "bg-[#0284c7] border-t-2 border-x border-[#38bdf8]"
-                                    : "bg-[#d97706] border-t-2 border-x border-[#fbbf24]"
-                                }`}
-                              />
-                            </div>
-                          </div>
-                        )}
-
-                        {/* CLUSTERED DUAL TEMPERATURE BARS */}
-                        {sevenDayMetric === "temp" && (
-                          <div className="w-full flex flex-col items-center h-full justify-end">
-                            <span className="text-[9px] font-mono text-zinc-300 mb-1">
-                              {formatTemp(d.espTemp.avg)}°
-                            </span>
-                            <div className="w-full max-w-[46px] flex items-end justify-center gap-1 h-full">
-                              {/* ESP8266 Ground-Truth */}
-                              <div
-                                style={{ height: `${espTempHeight}%` }}
-                                className="w-1/2 bg-[#ea580c] border-t-2 border-x border-[#f97316] rounded-t-sm"
-                                title={`ESP8266 Sensor: ${formatTemp(d.espTemp.avg)}° (Min ${formatTemp(d.espTemp.min)}°, Max ${formatTemp(d.espTemp.max)}°)`}
-                              />
-                              {/* Open-Meteo Model */}
-                              <div
-                                style={{ height: `${apiTempHeight}%` }}
-                                className="w-1/2 bg-[#2563eb] border-t-2 border-x border-[#60a5fa] rounded-t-sm"
-                                title={`OpenAPI Model: ${formatTemp(d.apiTemp.avg)}° (Min ${formatTemp(d.apiTemp.min)}°, Max ${formatTemp(d.apiTemp.max)}°)`}
-                              />
-                            </div>
-                          </div>
-                        )}
-
-                        {/* CLUSTERED DUAL HUMIDITY BARS */}
-                        {sevenDayMetric === "hum" && (
-                          <div className="w-full flex flex-col items-center h-full justify-end">
-                            <span className="text-[9px] font-mono text-zinc-300 mb-1">
-                              {d.espHum.avg}%
-                            </span>
-                            <div className="w-full max-w-[46px] flex items-end justify-center gap-1 h-full">
-                              {/* ESP8266 Humidity */}
-                              <div
-                                style={{ height: `${espHumHeight}%` }}
-                                className="w-1/2 bg-[#0891b2] border-t-2 border-x border-[#22d3ee] rounded-t-sm"
-                                title={`ESP8266 Hum: ${d.espHum.avg}%`}
-                              />
-                              {/* Open-Meteo Humidity */}
-                              <div
-                                style={{ height: `${apiHumHeight}%` }}
-                                className="w-1/2 bg-[#4f46e5] border-t-2 border-x border-[#818cf8] rounded-t-sm"
-                                title={`OpenAPI Hum: ${d.apiHum.avg}%`}
-                              />
-                            </div>
-                          </div>
+                          <span className="absolute right-2 -top-2.5 text-[9px] font-mono text-amber-400/90 bg-black/80 px-1 rounded">
+                            --- Acceptance Threshold (90%) ---
+                          </span>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
+                      <div className="w-full border-t border-zinc-800/80 border-dashed" />
+                      <div className="w-full border-t border-zinc-800" />
+                    </div>
 
-            {/* Bottom X-Axis Labels & Ticks */}
-            <div className="grid grid-cols-7 pl-12 text-center pt-2">
-              {benchmarkDays.map((d, i) => (
-                <div key={i} className="flex flex-col items-center">
-                  <div className="w-0.5 h-1.5 bg-zinc-600 mb-1" />
-                  <span className="text-[11px] font-mono font-bold text-zinc-200">{d.dayName}</span>
-                  <span className="text-[9px] font-mono text-zinc-500">{d.dateStr}</span>
+                    {/* 7 Columns */}
+                    <div className="relative h-full grid grid-cols-7 items-end z-10 px-2 sm:px-4">
+                      {benchmarkDays.map((d, i) => {
+                        const is88 = d.accuracy < 90;
+                        const isBetween90and95 = d.accuracy >= 90 && d.accuracy < 94;
+                        const is94Plus = d.accuracy >= 94;
+
+                        // Match height scaled from 80% to 100%
+                        const matchHeight = Math.min(100, Math.max(12, ((d.accuracy - 80) / (100 - 80)) * 100));
+
+                        // Temp height scaled from 15C to 40C
+                        const espTempHeight = Math.min(100, Math.max(15, ((d.espTemp.avg - 15) / (40 - 15)) * 100));
+                        const apiTempHeight = Math.min(100, Math.max(15, ((d.apiTemp.avg - 15) / (40 - 15)) * 100));
+
+                        // Hum height scaled 0 to 100
+                        const espHumHeight = d.espHum.avg;
+                        const apiHumHeight = d.apiHum.avg;
+
+                        return (
+                          <div key={i} className="flex flex-col items-center h-full justify-end group">
+                            {/* MATCH ACCURACY BAR VIEW */}
+                            {sevenDayMetric === "match" && (
+                              <div className="w-full flex flex-col items-center h-full justify-end">
+                                <span className={`text-[10px] sm:text-xs font-mono font-bold mb-1 tracking-tight ${
+                                  is94Plus ? "text-emerald-400" : isBetween90and95 ? "text-sky-300" : "text-amber-400"
+                                }`}>
+                                  {d.accuracy}%
+                                </span>
+
+                                <div className="w-full max-w-[34px] sm:max-w-[42px] flex flex-col justify-end h-full">
+                                  <div
+                                    style={{ height: `${matchHeight}%` }}
+                                    className={`w-full rounded-t-sm shadow-md transition-all ${
+                                      is94Plus
+                                        ? "bg-[#059669] border-t-2 border-x border-[#10b981]"
+                                        : isBetween90and95
+                                        ? "bg-[#0284c7] border-t-2 border-x border-[#38bdf8]"
+                                        : "bg-[#d97706] border-t-2 border-x border-[#fbbf24]"
+                                    }`}
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {/* CLUSTERED DUAL TEMPERATURE BARS */}
+                            {sevenDayMetric === "temp" && (
+                              <div className="w-full flex flex-col items-center h-full justify-end">
+                                <span className="text-[9px] font-mono text-zinc-300 mb-1">
+                                  {formatTemp(d.espTemp.avg)}°
+                                </span>
+                                <div className="w-full max-w-[46px] flex items-end justify-center gap-1 h-full">
+                                  <div
+                                    style={{ height: `${espTempHeight}%` }}
+                                    className="w-1/2 bg-[#ea580c] border-t-2 border-x border-[#f97316] rounded-t-sm"
+                                    title={`ESP8266 Sensor: ${formatTemp(d.espTemp.avg)}°`}
+                                  />
+                                  <div
+                                    style={{ height: `${apiTempHeight}%` }}
+                                    className="w-1/2 bg-[#2563eb] border-t-2 border-x border-[#60a5fa] rounded-t-sm"
+                                    title={`OpenAPI Model: ${formatTemp(d.apiTemp.avg)}°`}
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {/* CLUSTERED DUAL HUMIDITY BARS */}
+                            {sevenDayMetric === "hum" && (
+                              <div className="w-full flex flex-col items-center h-full justify-end">
+                                <span className="text-[9px] font-mono text-zinc-300 mb-1">
+                                  {d.espHum.avg}%
+                                </span>
+                                <div className="w-full max-w-[46px] flex items-end justify-center gap-1 h-full">
+                                  <div
+                                    style={{ height: `${espHumHeight}%` }}
+                                    className="w-1/2 bg-[#0891b2] border-t-2 border-x border-[#22d3ee] rounded-t-sm"
+                                    title={`ESP8266 Hum: ${d.espHum.avg}%`}
+                                  />
+                                  <div
+                                    style={{ height: `${apiHumHeight}%` }}
+                                    className="w-1/2 bg-[#4f46e5] border-t-2 border-x border-[#818cf8] rounded-t-sm"
+                                    title={`OpenAPI Hum: ${d.apiHum.avg}%`}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-              ))}
-            </div>
+
+                {/* Bottom X-Axis Labels & Ticks */}
+                <div className="grid grid-cols-7 pl-12 text-center pt-2">
+                  {benchmarkDays.map((d, i) => (
+                    <div key={i} className="flex flex-col items-center">
+                      <div className="w-0.5 h-1.5 bg-zinc-600 mb-1" />
+                      <span className="text-[11px] font-mono font-bold text-zinc-200">{d.dayName}</span>
+                      <span className="text-[9px] font-mono text-zinc-500">{d.dateStr}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
 
             {/* Statistical Regression Footer (Academic Flex for PPT) */}
             <div className="mt-3 pt-3 border-t border-zinc-800 grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-xs">
